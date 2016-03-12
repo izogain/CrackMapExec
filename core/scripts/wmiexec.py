@@ -224,7 +224,11 @@ class RemoteShell(cmd.Cmd):
         command = self.__shell + data
         if self.__noOutput is False:
             command += ' 1> ' + '\\\\127.0.0.1\\%s' % self.__share + self.__output  + ' 2>&1'
-        self.__win32Process.Create(command, self.__pwd, None)
+        
+        logging.info('Full command to be executed via WMI: {}'.format(command))
+        
+        #self.__win32Process.Create(command, self.__pwd, None)
+        self.__win32Process.Create(command, None, None)
         self.get_output()
 
     def send_data(self, data):
